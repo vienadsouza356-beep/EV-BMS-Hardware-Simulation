@@ -1,0 +1,97 @@
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+
+// TFT Display Pins
+#define TFT_CS 15
+#define TFT_DC 2
+#define TFT_RST 4
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+
+// Sensor & Actuator Pins
+const int cell1Pin = 34;
+const int cell2Pin = 35;
+const int cell3Pin = 32;
+const int tempPin = 33;
+const int relayPin = 12;
+const int buzzerPin = 14;
+
+// Safety Thresholds
+const float MIN_CELL_VOLTAGE = 3.0; // Minimum safe voltage per cell
+const float MAX_TEMP = 60.0;        // Maximum safe pack temperature (Celsius)
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Initialize Safety Hardware
+  pinMode(relayPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+  
+  // Start with the relay ON (Battery Pack Connected)
+  digitalWrite(relayPin, HIGH);
+
+  // Initialize Screen
+  tft.begin();
+  tft.setRotation(4); // Set to Landscape mode
+  tft.fillScreen(ILI9341_BLACK);
+
+  // Draw the Static Dashboard UI
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(10, 10);
+  tft.print("EV Battery Management");
+  tft.drawLine(10, 30, 300, 30, ILI9341_WHITE);
+}
+
+void loop() {
+  // 1. Read Simulated Sensors
+  // Convert ESP32 12-bit ADC (0-4095) to Li-ion Voltage (0.0V - 4.2V)
+  float cell1V = (analogRead(cell1Pin) / 4095.0) * 4.2;
+  float cell2V = (analogRead(cell2Pin) / 4095.0) * 4.2;
+  float cell3V = (analogRead(cell3Pin) / 4095.0) * 4.2;
+  
+  // Convert NTC analog reading to an approximate Celsius value
+  int rawTemp = analogRead(tempPin);
+  float packTemp = (rawTemp / 4095.0) * 100.0; 
+
+  // 2. Update TFT Dashboard Data
+  tft.fillRect(10, 50, 300, 150, ILI9341_BLACK); // Clear previous readings
+  
+  tft.setTextSize(2);
+  
+  // Cell 1
+  tft.setCursor(10, 50);
+  tft.setTextColor(cell1V >= MIN_CELL_VOLTAGE ? ILI9341_GREEN : ILI9341_RED);
+  tft.print("Cell 1: "); tft.print(cell1V, 2); tft.println(" V");
+
+  // Cell 2
+  tft.setCursor(10, 80);
+  tft.setTextColor(cell2V >= MIN_CELL_VOLTAGE ? ILI9341_GREEN : ILI9341_RED);
+  tft.print("Cell 2: "); tft.print(cell2V, 2); tft.println(" V");
+
+  // Cell 3
+  tft.setCursor(10, 110);
+  tft.setTextColor(cell3V >= MIN_CELL_VOLTAGE ? ILI9341_GREEN : ILI9341_RED);
+  tft.print("Cell 3: "); tft.print(cell3V, 2); tft.println(" V");
+  
+  // Pack Temperature
+  tft.setCursor(10, 150);
+  tft.setTextColor(packTemp < MAX_TEMP ? ILI9341_CYAN : ILI9341_RED);
+  tft.print("Pack Temp: "); tft.print(packTemp, 1); tft.println(" C");
+
+  // 3. Safety Cutoff Control Logic
+  if (cell1V < MIN_CELL_VOLTAGE || cell2V < MIN_CELL_VOLTAGE || cell3V < MIN_CELL_VOLTAGE || packTemp > MAX_TEMP) {
+    digitalWrite(relayPin, LOW);   // CUT BATTERY POWER (Main Contactor opens)
+    digitalWrite(buzzerPin, HIGH); // SOUND HIGH-VOLTAGE ALARM
+    
+    tft.setCursor(10, 200);
+    tft.setTextColor(ILI9341_RED);
+    tft.setTextSize(3);
+    tft.print("SYSTEM FAULT!");
+  } else {
+    digitalWrite(relayPin, HIGH);  // Keep power connected
+    digitalWrite(buzzerPin, LOW);  // Silence alarm
+  }
+
+  delay(500); // Wait half a second before refreshing the screen
+}
